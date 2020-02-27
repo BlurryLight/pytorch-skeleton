@@ -40,6 +40,7 @@ parser.add_argument('--resume', '-r', action='store_true',
 parser.add_argument('--epoch', '-e', default=201, type=int, help='epoches')
 parser.add_argument('--batchsize', '-bs', default=64,
                     type=int, help='batchsize')
+parser.add_argument('--SGD', default='store_true', help='use SGD')
 
 if(has_visdom):
     # visdom group
@@ -98,8 +99,7 @@ net = net.to(device)
 
 # training
 criterion = nn.CrossEntropyLoss()
-SGD_flag = True
-if SGD_flag:
+if args.SGD:
     optimizer = optim.SGD(net.parameters(), lr=args.lr,
                           momentum=00.9, weight_decay=5e-4)
 else:
@@ -171,3 +171,6 @@ for epoch in range(start_epoch, args.epoch):
             [epoch_mean_loss]), win=train_loss_handle, update='append')
         viz.line(env=args.env_name, X=np.array([[epoch, epoch]]), Y=np.array(
             [[train_acc, test_acc]]), win=acc_handle, update='append')
+
+# stop monitoring system
+child_process.terminate()
