@@ -9,6 +9,9 @@ import torch.optim as optim  # SGD/ADAM
 import torchvision
 import torchvision.transforms as transforms
 
+# user defined
+from models.lenet5 import LeNet
+
 # plain python
 import time
 import os
@@ -22,13 +25,12 @@ try:
     has_visdom = True
 except ImportError:
     has_visdom = False
+if(has_visdom):
+    from utils.utils import visdom_init
 
-
-# user defined
-from models.lenet5 import LeNet
 
 # the project root dir path
-root_path = Path(__file__)
+root_path = Path(__file__).parent
 
 # argparse
 parser = argparse.ArgumentParser(description="a skeleton for training/testing")
@@ -36,11 +38,13 @@ parser.add_argument('--lr', '-l', default=0.1, type=float, help='learning rate')
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--epoch', '-e', default=201, type=int, help='epoches')
-parser.add_argument('--batchsize', '-b', default=64, type=int, help='batchsize')
+parser.add_argument('--batchsize', '-bs', default=64,
+                    type=int, help='batchsize')
 
 if(has_visdom):
     # visdom group
     group = parser.add_argument_group("visdom group")
+    group.add_argument('--visdom', '-v', action='store_true')
     group.add_argument('--server', '-s', type=str, default='http://localhost',
                        help='visdom server url/ip address')
     group.add_argument('--port', '-p', type=int, default=8097,
@@ -50,16 +54,21 @@ if(has_visdom):
     group.add_argument('--env_name', '-n', type=str, default='env' + str(int(time.time()//60)),
                        help='Visdom env name,default is env_time_from_epoch')
 args = parser.parse_args()
+if(args.visdom == False):
+    # visdom should be specified to open
+    has_visdom = False
 
 # system monitor
 if(has_visdom):
+    viz, train_loss_handle, acc_handle = visdom_init(
+        viz_port=args.port, viz_server=args.server, viz_base_url=args.base_url, viz_env_name=args.env_name)
     child_process = subprocess.Popen(
-        ['python', root_path.joinpath('utils', 'sysem_visdom_monitor.py'),
-         '-s', args.server, '-p', args.port, '-b', args.base_url, '-n', args.env_name])
+        ['python', root_path.joinpath('utils', 'system_visdom_monitor.py'),
+         '-s', args.server, '-p', str(args.port), '-b', args.base_url, '-n', args.env_name])
 
 # fasionMnist
 train_set = torchvision.datasets.FashionMNIST(
-    root='./data/FashionMNISt',
+    root=root_path.joinpath('data', 'FashionMNIST'),
     train=True,
     download=True,
     transform=transforms.Compose([transforms.ToTensor()])
@@ -68,7 +77,7 @@ train_loader = torch.utils.data.DataLoader(
     train_set, batch_size=args.batchsize, shuffle=True, num_workers=4)
 
 test_set = torchvision.datasets.FashionMNIST(
-    root='./data/FashionMNISt',
+    root=root_path.joinpath('data', 'FashionMNIST'),
     train=False,
     download=True,
     transform=transforms.Compose([transforms.ToTensor()])
@@ -98,6 +107,8 @@ else:
 
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
+train_acc = 0
+test_acc = 0
 for epoch in range(start_epoch, args.epoch):
     net.train()
     batch_loss_list = []
@@ -119,11 +130,12 @@ for epoch in range(start_epoch, args.epoch):
 
     scheduler.step()
     epoch_mean_loss = np.mean(batch_loss_list)  # 这个epoch里面，每一个batch的loss的平均值
+    train_acc = 100. * correct / total
     print("TRAIN: epoch:%d,Loss:%.3f,Acc:%.3f%%,(%d/%d)" %
-          (epoch, epoch_mean_loss, 100. * correct/total, correct, total))
+          (epoch, epoch_mean_loss, train_acc, correct, total))
     # test
     # global best_acc
-    if(epoch != 0 and epoch % 5 == 0):
+    if(not epoch == 0) and (epoch % 5 == 0):
         batch_loss_list = []
         total = 0
         correct = 0
@@ -142,6 +154,7 @@ for epoch in range(start_epoch, args.epoch):
         epoch_mean_loss = np.mean(batch_loss_list)
         # save checkoints
         acc = 100. * correct/total
+        test_acc = acc
         if(acc > best_acc):
             print("==> saving checkpoints")
             best_acc = acc
@@ -153,3 +166,8 @@ for epoch in range(start_epoch, args.epoch):
             best_acc = acc
         print("TEST: epoch:%d,Loss:%.3f,Acc:%.3f%%,(%d/%d)" %
               (epoch, epoch_mean_loss, acc, correct, total))
+    if(has_visdom):
+        viz.line(env=args.env_name, X=np.array([epoch]), Y=np.array(
+            [epoch_mean_loss]), win=train_loss_handle, update='append')
+        viz.line(env=args.env_name, X=np.array([[epoch, epoch]]), Y=np.array(
+            [[train_acc, test_acc]]), win=acc_handle, update='append')
